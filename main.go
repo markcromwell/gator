@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
+	"time"
 
+	"github.com/google/uuid"
 	_ "github.com/lib/pq"
 	"github.com/markcromwell/gator/internal/config"
 	"github.com/markcromwell/gator/internal/database"
@@ -32,8 +35,9 @@ func (c *commands) run(s *state, cmd command) error {
 	return fmt.Errorf("unknown command: %s", cmd.name)
 }
 
-func (c *commands) register(name string, f func(*state, command) error) {
-	c.commandsMap[name] = f
+func (c *commands) register(name string, handler func(*state, command) error) error {
+	c.commandsMap[name] = handler
+	return nil
 }
 
 func handlerLogin(s *state, cmd command) error {
@@ -42,12 +46,46 @@ func handlerLogin(s *state, cmd command) error {
 	}
 
 	username := cmd.arguments[0]
+	ctx := context.Background()
+
+	// Check if user exists
+	_, err := s.dbQueries.GetUserByName(ctx, username)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("user %s not found", username)
+		}
+		return fmt.Errorf("error checking user existence: %w", err)
+	}
+
 	fmt.Printf("Logging in as %s\n", username)
 	return s.config.SetUser(username)
 }
 
-func main() {
+func handlerRegister(s *state, cmd command) error {
+	if len(cmd.arguments) == 0 {
+		return fmt.Errorf("username argument is required")
+	}
 
+	username := cmd.arguments[0]
+
+	fmt.Printf("Registering user %s\n", username)
+
+	user, error := s.dbQueries.CreateUser(context.Background(), database.CreateUserParams{
+		ID:        uuid.New(),       // Generates a new UUID v4.
+		CreatedAt: time.Now().UTC(), // Use current UTC time for creation timestamp.
+		UpdatedAt: time.Now().UTC(), // Same for update timestamp (often set to CreatedAt initially).
+		Name:      username,         // Example name string.
+	})
+
+	if error != nil {
+		return error
+	}
+
+	fmt.Printf("User registered with ID: %s\n", user.ID.String())
+	return s.config.SetUser(username)
+}
+
+func main() {
 	conf, err := config.Read()
 	if err != nil {
 		fmt.Println("Error reading config:", err)
@@ -57,7 +95,6 @@ func main() {
 	cmdState := &state{config: conf}
 
 	db, err := sql.Open("postgres", conf.DbURL)
-
 	if err != nil {
 		fmt.Println("Error connecting to the database:", err)
 		os.Exit(1)
@@ -67,7 +104,14 @@ func main() {
 	cmdState.dbQueries = database.New(db)
 
 	cmds := &commands{commandsMap: make(map[string]func(*state, command) error)}
-	cmds.register("login", handlerLogin)
+	if err := cmds.register("login", handlerLogin); err != nil {
+		fmt.Println("Error registering command:", err)
+		os.Exit(1)
+	}
+	if err := cmds.register("register", handlerRegister); err != nil {
+		fmt.Println("Error registering command:", err)
+		os.Exit(1)
+	}
 
 	args := os.Args
 	if len(args) < 2 {
@@ -78,7 +122,9 @@ func main() {
 	cmdName := args[1]
 	cmdArgs := args[2:]
 	cmd2Run := command{name: cmdName, arguments: cmdArgs}
-	if err := cmds.run(cmdState, cmd2Run); err != nil {
+	err = cmds.run(cmdState, cmd2Run)
+	db.Close()
+	if err != nil {
 		fmt.Println("Error executing command:", err)
 		os.Exit(1)
 	}

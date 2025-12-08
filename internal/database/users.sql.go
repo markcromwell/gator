@@ -23,6 +23,7 @@ VALUES (
 RETURNING id, created_at, updated_at, name
 `
 
+// CreateUserParams contains the input parameters for the CreateUser function.
 type CreateUserParams struct {
 	ID        uuid.UUID
 	CreatedAt time.Time
