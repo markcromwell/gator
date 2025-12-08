@@ -18,7 +18,7 @@ SELECT *
 FROM users
 WHERE name = $1;  
   
--- name: ListUsers :many
+-- name: GetUsers :many
 SELECT *
 FROM users
 ORDER BY created_at DESC

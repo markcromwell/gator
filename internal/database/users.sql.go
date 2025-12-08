@@ -23,7 +23,6 @@ VALUES (
 RETURNING id, created_at, updated_at, name
 `
 
-// CreateUserParams contains the input parameters for the CreateUser function.
 type CreateUserParams struct {
 	ID        uuid.UUID
 	CreatedAt time.Time
@@ -46,6 +45,15 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.Name,
 	)
 	return i, err
+}
+
+const deleteAllUsers = `-- name: DeleteAllUsers :exec
+DELETE FROM users
+`
+
+func (q *Queries) DeleteAllUsers(ctx context.Context) error {
+	_, err := q.db.ExecContext(ctx, deleteAllUsers)
+	return err
 }
 
 const getUserByID = `-- name: GetUserByID :one
@@ -84,20 +92,20 @@ func (q *Queries) GetUserByName(ctx context.Context, name string) (User, error) 
 	return i, err
 }
 
-const listUsers = `-- name: ListUsers :many
+const getUsers = `-- name: GetUsers :many
 SELECT id, created_at, updated_at, name
 FROM users
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
 `
 
-type ListUsersParams struct {
+type GetUsersParams struct {
 	Limit  int32
 	Offset int32
 }
 
-func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error) {
-	rows, err := q.db.QueryContext(ctx, listUsers, arg.Limit, arg.Offset)
+func (q *Queries) GetUsers(ctx context.Context, arg GetUsersParams) ([]User, error) {
+	rows, err := q.db.QueryContext(ctx, getUsers, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}

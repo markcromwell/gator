@@ -40,6 +40,16 @@ func (c *commands) register(name string, handler func(*state, command) error) er
 	return nil
 }
 
+func handlerReset(s *state, cmd command) error {
+	fmt.Println("Resetting users table...")
+	err := s.dbQueries.DeleteAllUsers(context.Background())
+	if err != nil {
+		return fmt.Errorf("error resetting users table: %w", err)
+	}
+	fmt.Println("Users table reset successfully.")
+	return nil
+}
+
 func handlerLogin(s *state, cmd command) error {
 	if len(cmd.arguments) == 0 {
 		return fmt.Errorf("username argument is required")
@@ -85,6 +95,24 @@ func handlerRegister(s *state, cmd command) error {
 	return s.config.SetUser(username)
 }
 
+func handlerUsers(s *state, cmd command) error {
+	if len(cmd.arguments) != 0 {
+		return fmt.Errorf("no arguments expected for users command")
+	}
+
+	users, err := s.dbQueries.GetUsers(context.Background(), database.GetUsersParams{Limit: 1000, Offset: 0})
+
+	if err != nil {
+		return err
+	}
+
+	for _, user := range users {
+		fmt.Printf("* %s\n", user.Name)
+	}
+
+	return nil
+}
+
 func main() {
 	conf, err := config.Read()
 	if err != nil {
@@ -109,6 +137,14 @@ func main() {
 		os.Exit(1)
 	}
 	if err := cmds.register("register", handlerRegister); err != nil {
+		fmt.Println("Error registering command:", err)
+		os.Exit(1)
+	}
+	if err := cmds.register("reset", handlerReset); err != nil {
+		fmt.Println("Error registering command:", err)
+		os.Exit(1)
+	}
+	if err := cmds.register("users", handlerUsers); err != nil {
 		fmt.Println("Error registering command:", err)
 		os.Exit(1)
 	}
