@@ -11,6 +11,7 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/markcromwell/gator/internal/config"
 	"github.com/markcromwell/gator/internal/database"
+	"github.com/markcromwell/gator/internal/feed"
 )
 
 type state struct {
@@ -107,9 +108,24 @@ func handlerUsers(s *state, cmd command) error {
 	}
 
 	for _, user := range users {
-		fmt.Printf("* %s\n", user.Name)
+		current := ""
+		if s.config.CurrentUserName == user.Name {
+			current = " (current)"
+		}
+		fmt.Printf("* %s%s\n", user.Name, current)
 	}
 
+	return nil
+}
+
+func handlerAgg(s *state, cmd command) error {
+	ctx := context.Background()
+	feedURL := "https://www.wagslane.dev/index.xml"
+	f, err := feed.FetchFeed(ctx, feedURL)
+	if err != nil {
+		return fmt.Errorf("fetch feed: %w", err)
+	}
+	fmt.Printf("%+v\n", f)
 	return nil
 }
 
@@ -145,6 +161,10 @@ func main() {
 		os.Exit(1)
 	}
 	if err := cmds.register("users", handlerUsers); err != nil {
+		fmt.Println("Error registering command:", err)
+		os.Exit(1)
+	}
+	if err := cmds.register("agg", handlerAgg); err != nil {
 		fmt.Println("Error registering command:", err)
 		os.Exit(1)
 	}
