@@ -72,6 +72,44 @@ func handlerLogin(s *state, cmd command) error {
 	return s.config.SetUser(username)
 }
 
+func handlerAddFeed(s *state, cmd command) error {
+	if len(cmd.arguments) < 2 {
+		return fmt.Errorf("feed name and URL arguments are required")
+	}
+
+	feedName := cmd.arguments[0]
+	feedURL := cmd.arguments[1]
+
+	currentUser, err := s.dbQueries.GetUserByName(context.Background(), s.config.CurrentUserName)
+	if err != nil {
+		return fmt.Errorf("get current user: %w", err)
+	}
+
+	fmt.Printf("Adding feed %s with URL %s for user %s\n", feedName, feedURL, currentUser.Name)
+
+	newFeed, err := s.dbQueries.CreateFeeds(context.Background(), database.CreateFeedsParams{
+		ID:        uuid.New(),
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+		Name:      feedName,
+		Url:       feedURL,
+		UserID:    currentUser.ID,
+	})
+	if err != nil {
+		return fmt.Errorf("create feed: %w", err)
+	}
+
+	fmt.Println("Feed added successfully.")
+	fmt.Println("Feed ID:", newFeed.ID.String())
+	fmt.Println("Feed Name:", newFeed.Name)
+	fmt.Println("Feed URL:", newFeed.Url)
+	fmt.Println("Associated User ID:", newFeed.UserID.String())
+	fmt.Println("Created At:", newFeed.CreatedAt)
+	fmt.Println("Updated At:", newFeed.UpdatedAt)
+	fmt.Println("Process complete.")
+	return nil
+}
+
 func handlerRegister(s *state, cmd command) error {
 	if len(cmd.arguments) == 0 {
 		return fmt.Errorf("username argument is required")
@@ -165,6 +203,10 @@ func main() {
 		os.Exit(1)
 	}
 	if err := cmds.register("agg", handlerAgg); err != nil {
+		fmt.Println("Error registering command:", err)
+		os.Exit(1)
+	}
+	if err := cmds.register("addfeed", handlerAddFeed); err != nil {
 		fmt.Println("Error registering command:", err)
 		os.Exit(1)
 	}
