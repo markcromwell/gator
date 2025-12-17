@@ -72,6 +72,23 @@ func handlerLogin(s *state, cmd command) error {
 	return s.config.SetUser(username)
 }
 
+func handlerFeeds(s *state, cmd command) error {
+	if len(cmd.arguments) != 0 {
+		return fmt.Errorf("no arguments expected for feeds command")
+	}
+
+	feeds, err := s.dbQueries.GetFeed(context.Background(), database.GetFeedParams{Limit: 1000, Offset: 0})
+	if err != nil {
+		return fmt.Errorf("error fetching feeds: %w", err)
+	}
+
+	for _, feed := range feeds {
+		fmt.Printf("* %s (%s) - %s\n", feed.Name, feed.ID.String(), feed.Url)
+	}
+
+	return nil
+}
+
 func handlerAddFeed(s *state, cmd command) error {
 	if len(cmd.arguments) < 2 {
 		return fmt.Errorf("feed name and URL arguments are required")
@@ -207,6 +224,10 @@ func main() {
 		os.Exit(1)
 	}
 	if err := cmds.register("addfeed", handlerAddFeed); err != nil {
+		fmt.Println("Error registering command:", err)
+		os.Exit(1)
+	}
+	if err := cmds.register("feeds", handlerFeeds); err != nil {
 		fmt.Println("Error registering command:", err)
 		os.Exit(1)
 	}
