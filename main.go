@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"time"
 
@@ -83,7 +84,12 @@ func handlerFeeds(s *state, cmd command) error {
 	}
 
 	for _, feed := range feeds {
-		fmt.Printf("* %s (%s) - %s\n", feed.Name, feed.ID.String(), feed.Url)
+		user, err := s.dbQueries.GetUserByID(context.Background(), feed.UserID)
+		if err != nil {
+			return fmt.Errorf("error fetching user for feed %s: %w", feed.ID.String(), err)
+		}
+
+		fmt.Printf("* %s (%s) - %s - %s\n", feed.Name, feed.ID.String(), feed.Url, user.Name)
 	}
 
 	return nil
@@ -184,6 +190,54 @@ func handlerAgg(s *state, cmd command) error {
 	return nil
 }
 
+/*
+	handlerFollows - takes a single url argument and creates a new feed follow record
+
+-- for the current user. It should print the name of the feed and the
+-- current user once the record is created
+*/
+func handlerFollow(s *state, cmd command) error {
+	if len(cmd.arguments) < 1 {
+		return fmt.Errorf("feed URL argument is required")
+	}
+
+	feedURL := cmd.arguments[0]
+
+	// Verify feedURL is a valid URL
+	_, err := url.ParseRequestURI(feedURL)
+	if err != nil {
+		return fmt.Errorf("invalid feed URL: %w", err)
+	}
+
+	currentUser, err := s.dbQueries.GetUserByName(context.Background(), s.config.CurrentUserName)
+	if err != nil {
+		return fmt.Errorf("get current user: %w", err)
+	}
+
+	feedRecord, err := s.dbQueries.GetFeedByURL(context.Background(), feedURL)
+	if err != nil {
+		return fmt.Errorf("get feed by URL: %w", err)
+	}
+
+	newFollow, err := s.dbQueries.CreateFeedFollow(context.Background(), database.CreateFeedFollowParams{
+		ID:        uuid.New(),
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+		UserID:    currentUser.ID,
+		FeedID:    feedRecord.ID,
+	})
+	if err != nil {
+		return fmt.Errorf("create feed follow: %w", err)
+	}
+
+	fmt.Println("Feed follow created successfully.")
+	fmt.Println("Feed Name:", feedRecord.Name)
+	fmt.Println("Followed by User:", currentUser.Name)
+	fmt.Println("Follow ID:", newFollow.ID.String())
+
+	return nil
+}
+
 func main() {
 	conf, err := config.Read()
 	if err != nil {
@@ -228,6 +282,10 @@ func main() {
 		os.Exit(1)
 	}
 	if err := cmds.register("feeds", handlerFeeds); err != nil {
+		fmt.Println("Error registering command:", err)
+		os.Exit(1)
+	}
+	if err := cmds.register("follow", handlerFollow); err != nil {
 		fmt.Println("Error registering command:", err)
 		os.Exit(1)
 	}

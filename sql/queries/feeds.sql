@@ -8,3 +8,16 @@ SELECT *
 FROM feeds
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2;
+
+-- name: GetFeedByID :one
+SELECT *
+FROM feeds
+WHERE id = $1;  
+
+-- name: GetFeedByURL :one
+SELECT *
+FROM feeds
+where url = $1;
+
+-- name: DeleteAllFeeds :exec
+DELETE FROM feeds;
