@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -201,14 +203,66 @@ func handlerUsers(s *state, cmd command) error {
 }
 
 func handlerAgg(s *state, cmd command) error {
-	ctx := context.Background()
-	feedURL := "https://www.wagslane.dev/index.xml"
-	f, err := feed.FetchFeed(ctx, feedURL)
-	if err != nil {
-		return fmt.Errorf("fetch feed: %w", err)
+	if len(cmd.arguments) != 1 {
+		return fmt.Errorf("time_between_reqs argument is required")
 	}
-	fmt.Printf("%+v\n", f)
-	return nil
+
+	intervalStr := cmd.arguments[0]
+	interval, err := time.ParseDuration(intervalStr)
+	if err != nil {
+		return fmt.Errorf("invalid interval: %w", err)
+	}
+
+	fmt.Printf("Collecting feeds every %s\n", interval)
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	sigc := make(chan os.Signal, 1)
+	signal.Notify(sigc, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigc)
+
+	ctx := context.Background()
+
+	// Run immediately, then on each tick. Outer loop waits for ticker or signal.
+	for {
+		// Try up to 10 feeds per tick
+		for i := 0; i < 10; i++ {
+			f, err := s.dbQueries.GetNextFeedToFetch(ctx)
+			if err != nil {
+				// no ready feeds or DB error; stop inner loop and wait for next tick
+				if err == sql.ErrNoRows {
+					break
+				}
+				fmt.Println("Error selecting next feed to fetch:", err)
+				break
+			}
+
+			fmt.Println("Fetching feed:", f.Url)
+			feedData, err := feed.FetchFeed(ctx, f.Url)
+			if err != nil {
+				fmt.Println("Error fetching feed:", err)
+			} else {
+				for _, item := range feedData.Channel.Item {
+					fmt.Printf("- %s\n  %s\n", item.Title, item.Link)
+				}
+			}
+
+			if err := s.dbQueries.MarkFeedFetched(ctx, f.ID); err != nil {
+				fmt.Println("Error marking feed fetched:", err)
+			}
+			// be polite to remote servers — wait a bit between requests
+			time.Sleep(1 * time.Second)
+		}
+
+		select {
+		case <-ticker.C:
+			continue
+		case <-sigc:
+			fmt.Println("received interrupt; exiting agg")
+			return nil
+		}
+	}
 }
 
 /*
@@ -308,6 +362,62 @@ func handlerUnfollow(s *state, cmd command, currentUser database.User) error {
 	return nil
 }
 
+// handlerScrapeFeeds - runs in the background to scrape all feeds and store new items.
+func handlerScrapeFeeds(s *state, cmd command) error {
+	// takes 1 parameter: interval in seconds, minutes or hours, or days 1s etc.
+	if len(cmd.arguments) != 1 {
+		return fmt.Errorf("interval argument is required")
+	}
+	intervalStr := cmd.arguments[0]
+	interval, err := time.ParseDuration(intervalStr)
+	if err != nil {
+		return fmt.Errorf("invalid interval: %w", err)
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	fmt.Printf("Starting feed scraping every %s %s\n", interval, s.config.CurrentUserName)
+
+	ctx := context.Background()
+
+	for {
+		<-ticker.C
+		fmt.Println("Scraping feeds...")
+
+		// Fetch up to 10 feeds to process this tick using GetNextFeedToFetch
+		for i := 0; i < 10; i++ {
+			f, err := s.dbQueries.GetNextFeedToFetch(ctx)
+			if err != nil {
+				// no feed ready or other error
+				if err == sql.ErrNoRows {
+					break
+				}
+				fmt.Println("Error selecting next feed to fetch:", err)
+				break
+			}
+
+			fmt.Println("Fetching feed:", f.Url)
+			feedData, err := feed.FetchFeed(ctx, f.Url)
+			if err != nil {
+				fmt.Println("Error fetching feed:", err)
+			} else {
+				for _, item := range feedData.Channel.Item {
+					fmt.Printf("- %s\n  %s\n", item.Title, item.Link)
+				}
+			}
+
+			if err := s.dbQueries.MarkFeedFetched(ctx, f.ID); err != nil {
+				fmt.Println("Error marking feed fetched:", err)
+			}
+
+			// be polite to remote servers
+			time.Sleep(1 * time.Second)
+		}
+	}
+
+}
+
 func main() {
 	conf, err := config.Read()
 	if err != nil {
@@ -364,6 +474,10 @@ func main() {
 		os.Exit(1)
 	}
 	if err := cmds.register("unfollow", middlewareLoggedIn(handlerUnfollow)); err != nil {
+		fmt.Println("Error registering command:", err)
+		os.Exit(1)
+	}
+	if err := cmds.register("scrapeFeeds", handlerScrapeFeeds); err != nil {
 		fmt.Println("Error registering command:", err)
 		os.Exit(1)
 	}

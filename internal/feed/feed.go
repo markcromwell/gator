@@ -70,6 +70,44 @@ func FetchFeed(ctx context.Context, feedURL string) (*RSSFeed, error) {
 		return nil, fmt.Errorf("xml unmarshal: %w", err)
 	}
 
+	// If no RSS <item> entries were found, attempt to parse Atom <entry> elements
+	// and convert them into RSSItem values.
+	if len(parsed.Channel.Item) == 0 {
+		type atomLink struct {
+			Href string `xml:"href,attr"`
+		}
+		type atomEntry struct {
+			Title   string   `xml:"title"`
+			Link    atomLink `xml:"link"`
+			Summary string   `xml:"summary"`
+			Updated string   `xml:"updated"`
+			Id      string   `xml:"id"`
+		}
+		type atomFeed struct {
+			Entries []atomEntry `xml:"entry"`
+		}
+
+		var a atomFeed
+		dec2 := xml.NewDecoder(bytes.NewReader(b))
+		// Ignore decode error here; fallback to RSS if Atom parse fails
+		if err := dec2.Decode(&a); err == nil && len(a.Entries) > 0 {
+			items := make([]RSSItem, 0, len(a.Entries))
+			for _, e := range a.Entries {
+				link := e.Link.Href
+				if link == "" {
+					link = e.Id
+				}
+				items = append(items, RSSItem{
+					Title:       e.Title,
+					Link:        link,
+					Description: e.Summary,
+					PubDate:     e.Updated,
+				})
+			}
+			parsed.Channel.Item = items
+		}
+	}
+
 	// Unescape HTML entities for the channel and each item
 	parsed.Channel.Title = html.UnescapeString(parsed.Channel.Title)
 	parsed.Channel.Description = html.UnescapeString(parsed.Channel.Description)
