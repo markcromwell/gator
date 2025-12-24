@@ -21,3 +21,7 @@ where url = $1;
 
 -- name: DeleteAllFeeds :exec
 DELETE FROM feeds;
+
+-- name: DeleteFeedByUserIDAndFeedID :exec
+DELETE FROM feeds
+WHERE id = $1 AND user_id = $2;
