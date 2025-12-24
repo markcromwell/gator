@@ -209,11 +209,6 @@ func TestHandlerFollow(t *testing.T) {
 	ffid := uuid.New()
 	now := time.Now()
 
-	// GetUserByName
-	mock.ExpectQuery(`SELECT .+ FROM users WHERE name`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at", "name"}).
-			AddRow(uid, now, now, "bob"))
-
 	// GetFeedByURL
 	mock.ExpectQuery(`SELECT .+ FROM feeds`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at", "name", "url", "user_id"}).
@@ -224,11 +219,13 @@ func TestHandlerFollow(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at", "user_id", "feed_id", "user_name", "feed_name"}).
 			AddRow(ffid, now, now, uid, fid, "bob", "feed1"))
 
+	currentUser := database.User{ID: uid, CreatedAt: now, UpdatedAt: now, Name: "bob"}
+
 	out := captureStdout(t, func() {
 		err := handlerFollow(s, command{
 			name:      "follow",
 			arguments: []string{"https://example.com/feed"},
-		})
+		}, currentUser)
 		if err != nil {
 			t.Fatalf("handlerFollow: %v", err)
 		}
