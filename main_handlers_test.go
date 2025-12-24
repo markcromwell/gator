@@ -170,23 +170,26 @@ func TestHandlerAddFeed(t *testing.T) {
 
 	uid := uuid.New()
 	fid := uuid.New()
+	ffid := uuid.New()
 	now := time.Now()
 
-	// First: GetUserByName for current user
-	mock.ExpectQuery(`SELECT .+ FROM users WHERE name`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at", "name"}).
-			AddRow(uid, now, now, "bob"))
-
-	// Second: CreateFeeds INSERT
+	// CreateFeeds INSERT
 	mock.ExpectQuery(`INSERT INTO feeds`).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at", "name", "url", "user_id"}).
 			AddRow(fid, now, now, "f1", "https://example.com/feed", uid))
+
+	// CreateFeedFollow (WITH inserted AS ...)
+	mock.ExpectQuery(`WITH inserted AS`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at", "user_id", "feed_id", "user_name", "feed_name"}).
+			AddRow(ffid, now, now, uid, fid, "bob", "f1"))
+
+	currentUser := database.User{ID: uid, CreatedAt: now, UpdatedAt: now, Name: "bob"}
 
 	out := captureStdout(t, func() {
 		err := handlerAddFeed(s, command{
 			name:      "addfeed",
 			arguments: []string{"f1", "https://example.com/feed"},
-		})
+		}, currentUser)
 		if err != nil {
 			t.Fatalf("handlerAddFeed: %v", err)
 		}
