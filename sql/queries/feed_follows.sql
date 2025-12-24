@@ -44,4 +44,8 @@ WHERE id = $1;
 -- name: DeleteAllFeedFollows :exec
 DELETE FROM feed_follows;
 
+-- name: DeleteFeedFollowByUserIDAndFeedID :exec
+DELETE FROM feed_follows
+WHERE feed_id = $1 AND user_id = $2;
+
 
