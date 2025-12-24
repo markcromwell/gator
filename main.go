@@ -283,28 +283,21 @@ func handlerUnfollow(s *state, cmd command, currentUser database.User) error {
 	if len(cmd.arguments) < 1 {
 		return fmt.Errorf("feed ID argument is required")
 	}
-	arg := cmd.arguments[0]
+	// The argument must be a feed URL (the feed identifier). Do not accept raw UUIDs.
+	feedURL := cmd.arguments[0]
 
-	// Try parsing as UUID first; if that fails, treat the argument as a feed URL
-	var feedID uuid.UUID
-	if id, err := uuid.Parse(arg); err == nil {
-		feedID = id
-	} else {
-		// validate URL
-		if _, err := url.ParseRequestURI(arg); err != nil {
-			return fmt.Errorf("invalid feed ID or URL: %w", err)
-		}
-
-		// Lookup feed by URL to get the feed ID
-		f, err := s.dbQueries.GetFeedByURL(context.Background(), arg)
-		if err != nil {
-			return fmt.Errorf("get feed by URL: %w", err)
-		}
-		feedID = f.ID
+	if _, err := url.ParseRequestURI(feedURL); err != nil {
+		return fmt.Errorf("invalid feed URL: %w", err)
 	}
 
-	err := s.dbQueries.DeleteFeedFollowByUserIDAndFeedID(context.Background(), database.DeleteFeedFollowByUserIDAndFeedIDParams{
-		FeedID: feedID,
+	// Lookup feed by URL to get the feed ID; error if not found
+	f, err := s.dbQueries.GetFeedByURL(context.Background(), feedURL)
+	if err != nil {
+		return fmt.Errorf("get feed by URL: %w", err)
+	}
+
+	err = s.dbQueries.DeleteFeedFollowByUserIDAndFeedID(context.Background(), database.DeleteFeedFollowByUserIDAndFeedIDParams{
+		FeedID: f.ID,
 		UserID: currentUser.ID,
 	})
 	if err != nil {
