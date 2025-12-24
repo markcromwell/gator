@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -362,6 +363,77 @@ func handlerUnfollow(s *state, cmd command, currentUser database.User) error {
 	return nil
 }
 
+// convert from string to sql.NullString
+func strToNullString(s string) sql.NullString {
+	if s == "" {
+		return sql.NullString{Valid: false}
+	}
+	return sql.NullString{String: s, Valid: true}
+}
+
+// ParseFeedDate attempts to parse a date string from RSS/Atom feeds using a comprehensive list of common formats.
+// It supports variations from RFC 822 (RSS) and RFC 3339/ISO 8601 (Atom), including:
+// - With/without weekdays
+// - Days with/without leading zeros
+// - Named timezones (e.g., MST, EST)
+// - Numeric offsets (e.g., -0700, +0200)
+// - UTC 'Z' designator
+// - Fractional seconds
+// - Rare cases with space instead of 'T' in ISO formats
+//
+// If parsing fails for all formats, it returns a zero time.Time and an error.
+func ParseFeedDate(dateStr string) (time.Time, error) {
+	formats := []string{
+		// RFC 822 / RSS variations (with weekday)
+		time.RFC1123,                   // "Mon, 02 Jan 2006 15:04:05 MST" (named TZ)
+		time.RFC1123Z,                  // "Mon, 02 Jan 2006 15:04:05 -0700" (numeric TZ)
+		"Mon, 2 Jan 2006 15:04:05 MST", // Day without leading zero, named TZ
+		"Mon, 2 Jan 2006 15:04:05 -0700",
+		"Mon, 02 Jan 2006 15:04:05 +0000", // +0000 offset
+		"Mon, 2 Jan 2006 15:04:05 +0000",
+
+		// Without weekday
+		"02 Jan 2006 15:04:05 MST",
+		"02 Jan 2006 15:04:05 -0700",
+		"2 Jan 2006 15:04:05 MST",
+		"2 Jan 2006 15:04:05 -0700",
+		"02 Jan 2006 15:04:05 +0000",
+		"2 Jan 2006 15:04:05 +0000",
+
+		// RFC 3339 / Atom variations
+		time.RFC3339,                     // "2006-01-02T15:04:05Z07:00" (wait, actually "2006-01-02T15:04:05-07:00")
+		time.RFC3339Nano,                 // With nanoseconds: "2006-01-02T15:04:05.999999999-07:00"
+		"2006-01-02T15:04:05Z",           // Z without offset
+		"2006-01-02T15:04:05.999999999Z", // Z with nano
+		"2006-01-02T15:04:05+00:00",      // +00:00
+		"2006-01-02T15:04:05-00:00",      // -00:00
+
+		// Rare: Space instead of 'T' (some non-standard feeds)
+		"2006-01-02 15:04:05Z",
+		"2006-01-02 15:04:05-07:00",
+		"2006-01-02 15:04:05+00:00",
+		"2006-01-02 15:04:05.999999999Z",
+
+		// Other observed formats from feeds
+		"Mon, 02 Jan 2006 15:04:05 GMT", // GMT specifically
+		"Mon, 2 Jan 2006 15:04:05 GMT",
+		"02 Jan 2006 15:04:05 GMT",
+		"2 Jan 2006 15:04:05 GMT",
+		"Mon, 02 Jan 2006 15:04:05 EST", // EST, etc.
+	}
+
+	var parsedTime time.Time
+	var lastErr error
+	for _, format := range formats {
+		parsedTime, lastErr = time.Parse(format, dateStr)
+		if lastErr == nil {
+			return parsedTime.UTC(), nil // Normalize to UTC for consistency
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("unable to parse date '%s' with any known format: %w", dateStr, lastErr)
+}
+
 // handlerScrapeFeeds - runs in the background to scrape all feeds and store new items.
 func handlerScrapeFeeds(s *state, cmd command) error {
 	// takes 1 parameter: interval in seconds, minutes or hours, or days 1s etc.
@@ -403,7 +475,27 @@ func handlerScrapeFeeds(s *state, cmd command) error {
 				fmt.Println("Error fetching feed:", err)
 			} else {
 				for _, item := range feedData.Channel.Item {
+					postDate, postErr := ParseFeedDate(item.PubDate)
+					if postErr != nil {
+						fmt.Println("Error parsing post date:", postErr)
+						continue
+					}
+
 					fmt.Printf("- %s\n  %s\n", item.Title, item.Link)
+					// Insert the post into the database
+					_, err := s.dbQueries.CreatePost(ctx, database.CreatePostParams{
+						ID:          uuid.New(),
+						CreatedAt:   time.Now().UTC(),
+						UpdatedAt:   time.Now().UTC(),
+						Title:       item.Title,
+						Url:         item.Link,
+						Description: strToNullString(item.Description),
+						PublishedAt: postDate,
+						FeedID:      f.ID,
+					})
+					if err != nil {
+						fmt.Println("Error inserting post into database:", err)
+					}
 				}
 			}
 
@@ -416,6 +508,33 @@ func handlerScrapeFeeds(s *state, cmd command) error {
 		}
 	}
 
+}
+
+// handlerBrowse command. It should take an optional "limit" parameter. If it's not provided, default the limit to 2. Print the posts in the terminal.
+func handlerBrowse(s *state, cmd command, currentUser database.User) error {
+	limit := 2
+	if len(cmd.arguments) > 0 {
+		var err error
+		limit, err = strconv.Atoi(cmd.arguments[0])
+		if err != nil {
+			return fmt.Errorf("invalid limit argument: %w", err)
+		}
+	}
+
+	posts, err := s.dbQueries.GetPostsForUser(context.Background(), database.GetPostsForUserParams{
+		UserID: currentUser.ID,
+		Limit:  int32(limit),
+		Offset: 0,
+	})
+	if err != nil {
+		return fmt.Errorf("error fetching posts: %w", err)
+	}
+
+	for _, post := range posts {
+		fmt.Printf("* %s\n  %s\n  Published at: %s\n", post.Title, post.Url, post.PublishedAt.String())
+	}
+
+	return nil
 }
 
 func main() {
@@ -481,6 +600,11 @@ func main() {
 		fmt.Println("Error registering command:", err)
 		os.Exit(1)
 	}
+	if err := cmds.register("browse", middlewareLoggedIn(handlerBrowse)); err != nil {
+		fmt.Println("Error registering command:", err)
+		os.Exit(1)
+	}
+
 	args := os.Args
 	if len(args) < 2 {
 		fmt.Println("Usage: gator <command> [arguments]")
