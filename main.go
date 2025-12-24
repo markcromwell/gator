@@ -477,8 +477,8 @@ func handlerScrapeFeeds(s *state, cmd command) error {
 				for _, item := range feedData.Channel.Item {
 					postDate, postErr := ParseFeedDate(item.PubDate)
 					if postErr != nil {
-						fmt.Println("Error parsing post date:", postErr)
-						continue
+						fmt.Println("Error parsing post date:", postErr, "- using current time")
+						postDate = time.Now().UTC()
 					}
 
 					fmt.Printf("- %s\n  %s\n", item.Title, item.Link)

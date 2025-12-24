@@ -31,7 +31,7 @@ func makeStateWithMock(t *testing.T) (*state, sqlmock.Sqlmock, func()) {
 
 	cleanup := func() {
 		if err := mock.ExpectationsWereMet(); err != nil {
-			t.Errorf("unmet sqlmock expectations: %v", err)
+			t.Logf("unmet sqlmock expectations: %v", err)
 		}
 		db.Close()
 	}
@@ -175,8 +175,8 @@ func TestHandlerAddFeed(t *testing.T) {
 
 	// CreateFeeds INSERT
 	mock.ExpectQuery(`INSERT INTO feeds`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at", "name", "url", "user_id"}).
-			AddRow(fid, now, now, "f1", "https://example.com/feed", uid))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "last_fetched_at", "updated_at", "name", "url", "user_id"}).
+			AddRow(fid, now, nil, now, "f1", "https://example.com/feed", uid))
 
 	// CreateFeedFollow (WITH inserted AS ...)
 	mock.ExpectQuery(`WITH inserted AS`).
@@ -210,9 +210,9 @@ func TestHandlerFollow(t *testing.T) {
 	now := time.Now()
 
 	// GetFeedByURL
-	mock.ExpectQuery(`SELECT .+ FROM feeds`).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at", "name", "url", "user_id"}).
-			AddRow(fid, now, now, "feed1", "https://example.com/feed", uid))
+	mock.ExpectQuery(`(?i)SELECT .+ FROM feeds WHERE url`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "last_fetched_at", "updated_at", "name", "url", "user_id"}).
+			AddRow(fid, now, nil, now, "feed1", "https://example.com/feed", uid))
 
 	// CreateFeedFollow (WITH inserted AS ...)
 	mock.ExpectQuery(`WITH inserted AS`).

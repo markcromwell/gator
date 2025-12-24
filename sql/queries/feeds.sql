@@ -36,5 +36,6 @@ WHERE id = $1;
 SELECT *
 FROM feeds
 WHERE last_fetched_at IS NULL
+	OR last_fetched_at <= NOW() - INTERVAL '10 minutes'
 ORDER BY last_fetched_at ASC NULLS FIRST
 LIMIT 1;
